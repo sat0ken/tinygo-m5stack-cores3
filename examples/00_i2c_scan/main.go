@@ -72,5 +72,5 @@ func name(addr uint16) string {
 
 func printHex(v uint8) {
 	const hex = "0123456789abcdef"
-	print(string(hex[v>>4]), string(hex[v&0xf]))
+	print(hex[v>>4:v>>4+1], hex[v&0xf:v&0xf+1])
 }
