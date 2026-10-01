@@ -152,3 +152,22 @@
 - 電源断から復帰した直後は、LCD 判別の E 用キーの読み戻しが 0x7f になる（ソフトリセットだけのときは 0x00 / 0x14）。
   どちらも ID4 で ILI9342C と判別できている。
 - Claude Code からプロセスを止めるとき `pkill -f <パターン>` を使うと、そのパターンを含む自分のシェルまで終了する。PID を指定して止める。
+
+## microSD / 画像表示（M6）
+- SD: tinygo-org/drivers `sdcard` + tinyfs `fatfs`（ElmChan FatFs を cgo で組み込み。exFAT 無効なので FAT12/16/32 のみ）。
+  `FS.Format()` はカードを消去するので呼ばない。
+- **esp32s3 ターゲットは `--wrap=malloc/calloc/free` でリンクする**（espradio 用）。fatfs の C コードが malloc を呼ぶと
+  `undefined symbol: __wrap_malloc` になる。`internal/libcwrap` で `__wrap_*` → `__real_*`（TinyGo runtime の malloc 等）に転送。
+  espradio と一緒に使うと重複定義になる点に注意。
+- GPIO35（LCD D/C と SD MISO の兼用）: M5GFX は LCD の CS を切り替えるたびに GPIO35 の出力信号を差し替える。
+  ここでは SD のブロックアクセスのたびに `cores3/sd.go` の sdBegin/sdEnd で切り替える:
+  - sdBegin: LCD_CS=High、SPI を SDI=GPIO35（FSPIQ 入力）・25MHz で再設定
+  - sdEnd: SD_CS=High、SPI を SDI なし・40MHz で再設定し、GPIO35 を GPIO 出力（D/C）に戻す
+  LCD 側のドライバには手を入れずに済む。sdcard ドライバは初期化後に自分で 4MHz に設定するが、sdBegin で 25MHz に上書きしている。
+- PNG: image/png で 320x240 RGBA を展開すると約 300KB 必要（ヒープは約 389KB）。`internal/pngstream` で 1 行ずつ展開して
+  そのまま LCD に送る（行バッファ 2 本 + zlib の窓）。8bit 深度・インターレースなし・色タイプ 0/2/3/4/6 に対応。
+  ホストの `go test` で公式画像 2 枚と各色タイプを image/png と全ピクセル比較して一致。
+- 公式テスト画像は https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/490/cores3_test_picture0{1,2}.png（320x240 RGBA、全画素不透明）。
+  Image Files チュートリアルの TestPicture01/02.png は公開されていないので、同じ画像をその名前でも置いた。
+  `tools/sdput` で端末から SD に書き込む（既存ファイルは上書きしない）。画像は git に入れず `tools/sdput/fetch.sh` で取得。
+- 実機（2026-10-01）: 4GB SDHC（FAT）。25MHz で読み書きでき、PNG 1 枚の表示に約 0.5 秒。既存ファイル（JPEG 13 個）が残っていることも確認。
