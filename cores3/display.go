@@ -38,6 +38,9 @@ var (
 // resets the panel through the AW9523B and sends the init sequence. The screen
 // is cleared to black. Init must have been called before.
 func InitDisplay() (*ili9342.Device, error) {
+	// 0. Make the microSD card ignore the LCD traffic (shared SCK / MOSI).
+	sdSPIMode()
+
 	// 1. Tell ILI9342C from ILI9342E (the pins are bit-banged for this).
 	// ref: M5GFX src/M5GFX.cpp (autodetect: _read_panel_id, _identify_ili9342(&panel_probe, keys, 1))
 	LCDProbe = ili9342.ProbeVariant(LCD_SCK, LCD_MOSI, LCD_CS, LCD_DC)

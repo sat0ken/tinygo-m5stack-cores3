@@ -103,3 +103,41 @@ func InitSD() error {
 	FS.Configure(&fatfs.Config{SectorSize: 512})
 	return FS.Mount()
 }
+
+// sdSPIMode puts the microSD card into SPI mode so that it ignores the LCD
+// traffic on the shared SCK / MOSI lines. A card left in SD mode can take
+// that traffic for SD commands (on its CMD line) and end up in a state where
+// only a power cycle helps.
+// ref: M5GFX src/M5GFX.cpp (_set_sd_spimode, _send_sd_dummy_clock; called in
+// autodetect before the panel is touched)
+func sdSPIMode() {
+	var dummy = [16]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	SD_CS.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	LCD_CS.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	sdBegin(400 * machine.KHz)
+	dummyClock := func() {
+		SD_CS.High()
+		SPI.Tx(dummy[:], nil)
+		SD_CS.Low()
+	}
+	dummyClock()
+	cmd58 := [8]byte{0x7A, 0, 0, 0, 0, 0xFD, 0xFF, 0xFF} // READ_OCR
+	var resp [8]byte
+	SPI.Tx(cmd58[:], resp[:])
+	spiMode := resp[6] != resp[7]
+	if !spiMode {
+		dummyClock()
+		cmd0 := [8]byte{0x40, 0, 0, 0, 0, 0x95, 0xFF, 0xFF} // GO_IDLE_STATE
+		SPI.Tx(cmd0[:], nil)
+	}
+	SD_CS.High()
+	sdEnd()
+	if Verbose {
+		print("cores3: SD card ")
+		if spiMode {
+			println("already in SPI mode")
+		} else {
+			println("switched to SPI mode (CMD0)")
+		}
+	}
+}

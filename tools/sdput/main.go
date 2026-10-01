@@ -38,18 +38,21 @@ func main() {
 	cores3.Init()
 	cores3.InitDisplay()
 	cores3.Verbose = false
+	// Was this boot caused by our own RTC power cycle? Read and clear the flag.
+	cores3.InitRTC()
+	ctrl2, _ := cores3.RTC.ReadRegister(bm8563.RegControl2)
+	wokeByRTC := ctrl2&bm8563.Ctrl2TF != 0
+	cores3.RTC.ClearIRQ()
+
 	if err := cores3.InitSD(); err != nil {
 		println("InitSD failed:", err.Error())
 		// A full power cycle resets a card stuck in initialization. Do it once:
-		// after the RTC wake-up the timer flag is set and we stop here.
-		cores3.InitRTC()
-		ctrl2, _ := cores3.RTC.ReadRegister(bm8563.RegControl2)
-		if ctrl2&bm8563.Ctrl2TF == 0 {
+		// after the RTC wake-up we stop here.
+		if !wokeByRTC {
 			println("power-cycling the board (back in 3 s)")
 			time.Sleep(100 * time.Millisecond)
 			cores3.TimerSleep(3 * time.Second)
 		}
-		cores3.RTC.ClearIRQ()
 		halt()
 	}
 	put("/cores3_test_picture01.png", pic01)
