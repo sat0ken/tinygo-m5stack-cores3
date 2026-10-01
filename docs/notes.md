@@ -71,10 +71,18 @@
   drag は「hold のあとに動かした」状態（hold 0101 | flick_begin 1011 = drag_begin 1111）。
 - 座標変換: Touch_M5StackCoreS3 は x 0..319 / y 0..239、offset_rotation 0。既定の画面向きではコントローラ回転 0 なので、生座標＝画面座標。
 - 実機: `FT6336U CIPHER=0x64 FIRMID=0x10 VENDID=0x11`。
+- 実機確認（2026-10-01）: touch / hold / flick / drag の begin・本体・end がすべて期待どおりに遷移。
+  四隅は 左上(0,29) 右上(319,17) 左下(3,239) 右下(319,239)。X は 0〜319 の全域、Y は下端 239 まで出る。
+  TODO(verify): 上端で Y が 17 未満にならなかった（指が上端まで届いていなかった可能性あり）。
 
 ## 電源ボタン（M3）
 - AXP2101 の IRQ ステータス 0x49 の bit3（短押し）/ bit2（長押し）を 4ms ごとに読み、1 を書いてクリアする（M5Unified `getPekPress`）。
   押している最中の状態は取れない（公式でも wasClicked / wasHold 相当のみ）。
+- 実機確認（2026-10-01）: 短押し 1 回につき clicked が 1 回（取りこぼし・二重検出なし）、約 1.5 秒押しで hold を検出。
+
+## シリアルログの取り方（Claude Code から）
+- `tinygo monitor` は TTY が必要なので、非対話環境では `stty -F /dev/ttyACM0 115200 raw -echo; timeout N cat /dev/ttyACM0` で読む。
+- USB Serial/JTAG はホストが読んでいない間の出力を捨てる。人が操作する確認は、先にログ記録を開始しておく。
 
 ## 文字表示
 - tinyfont の `WriteLine` は 1 ピクセルずつ `SetPixel` を呼ぶので、SPI LCD ではウィンドウ設定のコストが大きい。
