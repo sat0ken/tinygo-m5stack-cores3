@@ -16,14 +16,7 @@ func main() {
 	time.Sleep(2 * time.Second) // give `tinygo monitor` time to attach
 
 	bus := machine.I2C0
-	err := bus.Configure(machine.I2CConfig{
-		Frequency: 100 * machine.KHz,
-		SDA:       cores3.I2C_SDA,
-		SCL:       cores3.I2C_SCL,
-	})
-	if err != nil {
-		println("i2c configure error:", err.Error())
-	}
+	configure(bus)
 
 	w := []byte{0x00}
 	for {
@@ -33,16 +26,31 @@ func main() {
 			// A read-only transaction does not report NACK on the TinyGo ESP32-S3
 			// I2C implementation (the NACK of the last read byte is masked), so probe
 			// with a one byte write of register pointer 0x00 instead.
-			if bus.Tx(addr, w, nil) == nil {
-				print("found 0x")
-				printHex(uint8(addr))
-				print(" ")
-				println(name(addr))
-				found++
+			if bus.Tx(addr, w, nil) != nil {
+				// After a NACK the TinyGo ESP32-S3 I2C controller fails every
+				// following transaction until it is configured again.
+				configure(bus)
+				continue
 			}
+			print("found 0x")
+			printHex(uint8(addr))
+			print(" ")
+			println(name(addr))
+			found++
 		}
 		println("devices:", found)
 		time.Sleep(3 * time.Second)
+	}
+}
+
+func configure(bus *machine.I2C) {
+	err := bus.Configure(machine.I2CConfig{
+		Frequency: 100 * machine.KHz,
+		SDA:       cores3.I2C_SDA,
+		SCL:       cores3.I2C_SCL,
+	})
+	if err != nil {
+		println("i2c configure error:", err.Error())
 	}
 }
 

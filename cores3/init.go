@@ -1,6 +1,7 @@
 package cores3
 
 import (
+	"device/esp"
 	"machine"
 	"time"
 
@@ -13,8 +14,9 @@ import (
 const I2CFrequency = 400 * machine.KHz
 
 var (
-	// I2C is the internal I2C bus (G12/G11), configured by Init.
-	I2C = machine.I2C0
+	// I2C is the internal I2C bus (G12/G11), configured by Init. Use it (not
+	// machine.I2C0 directly) for the on-board chips: see i2c.go.
+	I2C = &i2cBus{bus: machine.I2C0, reg: esp.I2C0}
 
 	// PMIC is the AXP2101, ready after Init.
 	PMIC axp2101.Device
@@ -32,12 +34,12 @@ var Verbose = true
 // After Init the LCD backlight is on (DLDO1), and all peripheral rails
 // (ALDO1..4) are enabled. The LCD itself is not initialized: see InitDisplay.
 func Init() error {
-	err := I2C.Configure(machine.I2CConfig{
+	I2C.cfg = machine.I2CConfig{
 		Frequency: I2CFrequency,
 		SDA:       I2C_SDA,
 		SCL:       I2C_SCL,
-	})
-	if err != nil {
+	}
+	if err := I2C.configure(); err != nil {
 		return err
 	}
 
