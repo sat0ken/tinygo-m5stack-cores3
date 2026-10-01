@@ -25,7 +25,7 @@ const fileName = "/sample-12s.wav"
 // volume scales the samples (256 = as recorded).
 // TODO(verify): M5Unified plays at master volume 64 by default; its scaling is
 // not reproduced exactly.
-const volume = 64
+const volume = 128
 
 var (
 	con     gfx.Console
@@ -97,7 +97,10 @@ func playWAV(path string) {
 	s = gfx.Itoa(s, int(fm.BitsPerSample))
 	log(gfx.String(append(s, "bit"...)))
 
-	if err := cores3.StartSpeakerStereo(fm.SampleRate, fm.Channels == 2); err != nil {
+	// The speaker always runs at 48 kHz mono (as M5Unified): stereo data is
+	// mixed down and every rate is resampled. The CoreS3 amplifier plays the
+	// left slot only and stays silent at 44.1 kHz (docs/notes.md).
+	if err := cores3.StartSpeaker(cores3.SpeakerSampleRate); err != nil {
 		log("Speaker start failed")
 		return
 	}
@@ -118,20 +121,22 @@ func playWAV(path string) {
 		remain -= got
 		read += got
 		k := 0
-		if fm.BitsPerSample == 16 {
-			for i := 0; i+1 < got; i += 2 {
-				v := int32(int16(uint16(readBuf[i]) | uint16(readBuf[i+1])<<8))
-				pcm[k] = int16(v * volume / 256)
-				k++
+		bps := int(fm.BitsPerSample / 8)
+		frame := bps * int(fm.Channels)
+		for i := 0; i+frame <= got; i += frame {
+			var sum int32
+			for c := 0; c < int(fm.Channels); c++ {
+				j := i + c*bps
+				if bps == 2 {
+					sum += int32(int16(uint16(readBuf[j]) | uint16(readBuf[j+1])<<8))
+				} else { // 8 bit unsigned
+					sum += (int32(readBuf[j]) - 128) << 8
+				}
 			}
-		} else { // 8 bit unsigned
-			for i := 0; i < got; i++ {
-				v := (int32(readBuf[i]) - 128) << 8
-				pcm[k] = int16(v * volume / 256)
-				k++
-			}
+			pcm[k] = int16(sum / int32(fm.Channels) * volume / 256)
+			k++
 		}
-		cores3.QueuePCM(pcm[:k])
+		cores3.QueuePCMResampled(pcm[:k], fm.SampleRate)
 		if pct := read * 100 / int(fm.DataSize); pct >= nextReport {
 			s = append(line[:0], "Progress "...)
 			s = gfx.Itoa(s, pct)
@@ -139,7 +144,7 @@ func playWAV(path string) {
 			nextReport += 20
 		}
 	}
-	cores3.PlayPCM(nil) // wait for the end
+	cores3.FlushResampled() // wait for the end
 	cores3.StopSpeaker()
 	ms := time.Since(start).Milliseconds()
 	s = append(line[:0], "Playback completed! "...)

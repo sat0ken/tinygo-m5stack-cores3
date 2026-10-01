@@ -5,9 +5,9 @@
 //
 // ref: https://docs.m5stack.com/ja/arduino/m5cores3/mic
 //
-// Differences: the speaker is driven directly at 17 kHz (M5 resamples to its
-// output rate), and the tutorial's Speaker.setVolume(255) has no equivalent
-// (PCM is played as recorded).
+// Differences: the tutorial's Speaker.setVolume(255) has no equivalent (PCM is
+// played as recorded). As in M5Unified, playback runs at 48 kHz and the 17 kHz
+// recording is resampled.
 package main
 
 import (
@@ -108,17 +108,18 @@ func main() {
 		if cores3.Touch.Count() > 0 && cores3.Touch.Detail().WasClicked() {
 			clearScreen(d)
 			cores3.StopMic()
-			if err := cores3.StartSpeaker(recordSamplerate); err != nil {
+			if err := cores3.StartSpeaker(cores3.SpeakerSampleRate); err != nil {
 				println("StartSpeaker failed:", err.Error())
 			}
 			gfx.FillTriangle(d, 130-8, 15-8, 130-8, 15+8, 130+8, 15, playColor)
 			gfx.DrawTextTopCenter(d, font, 180, 3, "PLAY", gfx.White)
 			println("play from block", recRecordIdx)
 			startPos := recRecordIdx * recordLength
-			cores3.PlayPCM(recData[startPos:])
+			cores3.QueuePCMResampled(recData[startPos:], recordSamplerate)
 			if startPos > 0 {
-				cores3.PlayPCM(recData[:startPos])
+				cores3.QueuePCMResampled(recData[:startPos], recordSamplerate)
 			}
+			cores3.FlushResampled()
 			cores3.StopSpeaker()
 			if err := cores3.StartMic(recordSamplerate); err != nil {
 				println("StartMic failed:", err.Error())

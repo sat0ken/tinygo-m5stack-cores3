@@ -26,8 +26,12 @@ func InitSpeaker() error { return StartSpeaker(SpeakerSampleRate) }
 func StartSpeaker(rate uint32) error { return StartSpeakerStereo(rate, false) }
 
 // StartSpeakerStereo is StartSpeaker with interleaved L, R samples when
-// stereo is true. (The CoreS3 has one speaker; the AW88298 mixes the slots
-// according to its default channel setting.)
+// stereo is true.
+//
+// Measured on a CoreS3 (2026-10-01): the AW88298 plays only the LEFT slot,
+// and there is no sound at all at 44.1 kHz (48 kHz and 17 kHz work). Use
+// StartSpeaker(SpeakerSampleRate) with QueuePCMResampled instead, as
+// M5Unified does (fixed 48 kHz mono output, data resampled).
 func StartSpeakerStereo(rate uint32, stereo bool) error {
 	speakerRate = rate
 	i2s.I2S1TX.Configure(i2s.Config{
@@ -67,6 +71,54 @@ func PlayPCM(samples []int16) {
 // only while the DMA ring is full). Call PlayPCM(nil) to wait for the end.
 func QueuePCM(samples []int16) {
 	i2s.I2S1TX.Write(samples)
+}
+
+// resampler converts a mono stream to the speaker rate by linear
+// interpolation (M5Unified Speaker_Class also plays everything at its output
+// rate and interpolates the source data).
+type resampler struct {
+	step     uint32 // input samples per output sample, 16.16 fixed point
+	frac     uint32
+	prev     int32
+	cur      int32
+	inRate   uint32
+	out      [256]int16
+	outCount int
+}
+
+var rs resampler
+
+// QueuePCMResampled queues mono samples recorded at inRate, converting them
+// to the speaker rate. Call PlayPCM(nil) at the end to drain.
+func QueuePCMResampled(in []int16, inRate uint32) {
+	if rs.inRate != inRate {
+		rs = resampler{inRate: inRate, step: uint32(uint64(inRate) << 16 / uint64(speakerRate))}
+	}
+	for _, s := range in {
+		rs.prev, rs.cur = rs.cur, int32(s)
+		for rs.frac < 1<<16 {
+			v := rs.prev + (rs.cur-rs.prev)*int32(rs.frac)>>16
+			rs.out[rs.outCount] = int16(v)
+			rs.outCount++
+			if rs.outCount == len(rs.out) {
+				i2s.I2S1TX.Write(rs.out[:])
+				rs.outCount = 0
+			}
+			rs.frac += rs.step
+		}
+		rs.frac -= 1 << 16
+	}
+}
+
+// FlushResampled queues what is left in the resampler and waits until
+// everything has been played.
+func FlushResampled() {
+	if rs.outCount > 0 {
+		i2s.I2S1TX.Write(rs.out[:rs.outCount])
+		rs.outCount = 0
+	}
+	rs.inRate = 0
+	i2s.I2S1TX.Flush()
 }
 
 // toneWave is M5Unified's default tone wave (one sine period, unsigned 8 bit).
