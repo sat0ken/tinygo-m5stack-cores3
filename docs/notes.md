@@ -102,3 +102,32 @@
 - ビルド開始から実際にセットされるまで約 8.5 秒（書き込み約 6 秒 + 起動待ち 2 秒 + 初期化）。現在時刻に +9 秒して渡すとホストと 1 秒未満で一致した:
   `tinygo flash -target=esp32s3-generic -ldflags="-X main.setTime=$(date -u -d '+9 sec' +%Y-%m-%dT%H:%M:%SZ)" ./examples/04_rtc`
 - ESP32 の時計は `runtime.AdjustTimeOffset` で RTC に合わせる（`cores3.SyncSystemTime`）。
+
+## LTR-553（M4）
+- 公式は M5CoreS3 リポジトリの `src/utility/LTR5XX.{h,cpp}`（LTR55X 分岐）を使う。レジスタ・ビット位置・既定値はそこから移植（`drivers/ltr553`）。
+- ALS の値は 2 チャンネルの平均 `(CH0 + CH1) >> 1`（LTR5XX::getAlsValue）。PS は 11bit。
+- 実機: PART_ID=0x92, MANUFAC_ID=0x05。室内で ALS≈1479（ゲイン48x）、手を近づけない状態で PS=0〜6。
+
+## 電源（M4）
+- 公式は M5.begin の既定 `cfg.output_power = true` で Grove/M-BUS への 5V 出力（BUS_OUT_EN）も有効にするが、
+  M5Unified はバッテリー無し＋外部 5V 入力時に取り消す保護ロジック（TS 電圧の判定）を持っている。
+  表示内容には影響しないので、06_power では 5V 出力を有効にしていない（Init の状態のまま）。
+- 実機: 充電中=1、4055mV、45%、VBUS 4917mV。充電電流レジスタ 0x62=8（200mA）。
+
+## IMU（M4）
+- BMI270 の設定ブロブ（8192 バイト）は Bosch 公式 BMI270_SensorAPI（commit 41129fc）の `bmi270_config_file[]` から生成。
+  M5Unified 同梱のものとバイト単位で一致することを確認済み。BSD-3-Clause のライセンス表記を `drivers/bmi270/config.go` に残した。
+- ロード手順は Bosch に合わせた（INIT_CTRL=0 → INIT_ADDR=index/2 でチャンク書き込み → INIT_CTRL=1 → INTERNAL_STATUS&0x0F==1 を待つ）。
+  M5Unified は INIT_CTRL=0 を省略し、8KB を 1 回で書き、INTERNAL_STATUS は 0 以外かだけを見る。
+- BMM150 は BMI270 の AUX I2C 経由（M5Unified と同じ: 0x4B=0x83, WhoAmI 0x40=0x32, 0x4C=0x38, AUX_IF_CONF=0x4F, AUX_RD_ADDR=0x42, PWR_CTRL=0x0F）。
+- CoreS3 では地磁気の Y・Z を反転（M5Unified IMU_Class: board_M5StackCoreS3 && addr 0x69）。
+- 実機: INTERNAL_STATUS=0x01、BMM150 WhoAmI=0x32。平置きで az≈0.995G、ジャイロ ≈0 dps。
+- TODO(verify): **BMM150 の Y が常に -4096（13bit のオーバーフロー値）**。AUX 手動モードで 0x42〜0x49 を直接読んでも
+  同じ（x13=879, y13=-4096, z15=-3776）なので、読み出し・解釈ではなくセンサー出力そのもの。設定は M5Unified と同一なので
+  公式版でも同じ値になるはず。近くの磁石（スピーカー等）による飽和の可能性。向きを変えたときの変化を実機で要確認。
+
+## TinyGo 0.42 / Xtensa のコード生成の疑い
+- 07_imu で `labels := [3]string{l0, l1, l2}` をループ変数で `labels[i]` と参照し `append(b[:0], labels[i]...)` すると、
+  ヒープ使用量 12KB / 389KB の状態で `fatal error: out of memory` になった（`-print-allocs` ではその関数にヒープ確保なし、
+  スタックを 32KB にしても再現）。文字列を 1 つずつ引数で渡す形にしたら解消。
+  TODO: 最小再現コードを作って TinyGo に報告する。

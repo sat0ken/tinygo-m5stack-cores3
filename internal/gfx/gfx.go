@@ -167,6 +167,9 @@ func (c *Console) Print(str string) {
 			c.Y += lineH
 			continue
 		}
+		if r == '\r' { // ignored, as in M5GFX
+			continue
+		}
 		g := glyph(c.Font, r)
 		adv := int16(g.XAdvance)
 		if c.X+adv > w {
@@ -187,4 +190,21 @@ func Append2(buf []byte, v int) []byte {
 // Append4 appends v as four decimal digits (zero padded).
 func Append4(buf []byte, v int) []byte {
 	return append(buf, byte('0'+v/1000%10), byte('0'+v/100%10), byte('0'+v/10%10), byte('0'+v%10))
+}
+
+// AppendFloat appends v with 6 fraction digits, like printf("%f").
+func AppendFloat(buf []byte, v float32) []byte {
+	f := float64(v)
+	if f < 0 {
+		buf = append(buf, '-')
+		f = -f
+	}
+	n := int64(f*1e6 + 0.5)
+	buf = Itoa(buf, int(n/1000000))
+	buf = append(buf, '.')
+	frac := int(n % 1000000)
+	for d := 100000; d > 0; d /= 10 {
+		buf = append(buf, byte('0'+frac/d%10))
+	}
+	return buf
 }
