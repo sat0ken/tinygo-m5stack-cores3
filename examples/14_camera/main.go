@@ -1,7 +1,8 @@
-// 14_camera shows a live preview from the GC0308 camera; touching the screen
-// freezes the latest frame and saves it on the microSD card as /CAM_nnnn.BMP
-// (24 bit BMP, the first unused number; existing files are never
-// overwritten).
+// 14_camera shows a live preview from the GC0308 camera. Touching the screen
+// starts a 3-2-1 countdown (shown over the preview, so the finger is out of
+// the picture when the shot is taken); then the frame is frozen and saved on
+// the microSD card as /CAM_nnnn.BMP (24 bit BMP, the first unused number;
+// existing files are never overwritten).
 //
 // The M5Stack tutorial streams video with two frame buffers in PSRAM, which
 // TinyGo does not support; here one frame buffer in internal RAM is captured
@@ -70,23 +71,45 @@ func main() {
 	}
 	frames := 0
 	fpsStart := time.Now()
+	var countdownStart time.Time
+	counting := false
 	for {
-		save := touched()
+		if !counting && touched() {
+			counting, countdownStart = true, time.Now()
+			println("countdown")
+		}
 		if err := cores3.CapturePhoto(photo[:]); err != nil {
 			println("capture failed:", err.Error())
 			continue
 		}
-		d.DrawRGBBitmap8(0, 0, photo[:], cores3.PhotoWidth, cores3.PhotoHeight)
-		frames++
-		if frames%50 == 0 {
-			ms := time.Since(fpsStart).Milliseconds()
-			println("preview:", 50*1000/ms, "fps")
-			fpsStart = time.Now()
+		save := false
+		if counting {
+			left := 3 - int(time.Since(countdownStart)/time.Second) // 3, 2, 1, then 0 = shoot
+			if left <= 0 {
+				// this frame was captured after the countdown: keep it as the photo
+				counting, save = false, true
+			} else {
+				d.DrawRGBBitmap8(0, 0, photo[:], cores3.PhotoWidth, cores3.PhotoHeight)
+				drawCount(d, w, h, left)
+			}
 		}
-		save = touched() || save
 		if !save {
+			if !counting {
+				d.DrawRGBBitmap8(0, 0, photo[:], cores3.PhotoWidth, cores3.PhotoHeight)
+			}
+			frames++
+			if frames%50 == 0 {
+				ms := time.Since(fpsStart).Milliseconds()
+				println("preview:", 50*1000/ms, "fps")
+				fpsStart = time.Now()
+			}
+			if !counting && touched() {
+				counting, countdownStart = true, time.Now()
+				println("countdown")
+			}
 			continue
 		}
+		d.DrawRGBBitmap8(0, 0, photo[:], cores3.PhotoWidth, cores3.PhotoHeight)
 		if !sdOK {
 			gfx.DrawTextCentered(d, font, w/2, h-16, "No SD card", gfx.Red)
 			time.Sleep(1500 * time.Millisecond)
@@ -108,6 +131,18 @@ func main() {
 		fpsStart = time.Now()
 		frames = 0
 	}
+}
+
+var countFont = &freesans.Bold24pt7b
+
+// drawCount draws the countdown digit in the middle of the screen, yellow
+// with a black outline so that it reads on any picture.
+func drawCount(d gfx.Filler, w, h int16, n int) {
+	digit := "0123456789"[n : n+1]
+	for _, o := range [...][2]int16{{-2, 0}, {2, 0}, {0, -2}, {0, 2}, {-2, -2}, {2, 2}, {-2, 2}, {2, -2}} {
+		gfx.DrawTextCentered(d, countFont, w/2+o[0], h/2+o[1], digit, gfx.Black)
+	}
+	gfx.DrawTextCentered(d, countFont, w/2, h/2, digit, gfx.Yellow)
 }
 
 // savePhoto writes the photo to the first unused /CAM_nnnn.BMP.
