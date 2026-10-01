@@ -225,6 +225,13 @@ func (d *Device) ChargeStatus() (ChargeStatus, error) {
 	return Standby, err
 }
 
+// IsCharging reports whether the battery is being charged.
+// ref: M5Unified AXP2101_Class::isCharging ((reg 0x01 & 0b01100000) == 0b00100000)
+func (d *Device) IsCharging() (bool, error) {
+	v, err := d.ReadRegister(RegStatus2)
+	return v&0x60 == 0x20, err
+}
+
 // BatteryVoltage returns the battery voltage in mV.
 // ref: M5Unified AXP2101_Class::getBatteryVoltage (readRegister14(0x34) / 1000.0f V)
 func (d *Device) BatteryVoltage() (uint16, error) {
