@@ -248,3 +248,18 @@
   - esp32-camera は VSYNC 割り込みでフレームの区切りを取る。割り込みなしでは VSYNC（G46）のポーリングで代用する。
 - GC0308 の初期化: esp32-camera sensors/private_include/gc0308_settings.h の 247 レジスタ + set_pixformat(RGB565) + set_framesize（QVGA はサブサンプル設定）。
 - 表示: 153.6KB を SPI 40MHz で送ると理論値 31ms。TinyGo の SPI は 64 バイトずつのポーリングなので実測は 40〜100ms 程度の見込み → 5〜10fps。
+
+## カメラ（M8）: 写真の撮影と BMP 保存
+- 映像の連続表示ではなく、ユーザーと相談して「タップで 1 枚撮って表示、SD に BMP 保存」にした（PSRAM なしで 1 フレーム 153.6KB を内部 RAM に置く）。
+- `drivers/gc0308`: esp32-camera の reset（ソフトリセット + 既定 247 レジスタ）、set_pixformat(RGB565)、set_framesize（QVGA は 1/2 サブサンプル）。
+  チップ ID 0x9b（M5GFX の判定と同じ）。
+- `internal/cam`: LCD_CAM（cam_clk_sel=3、VSYNC は反転入力）+ GDMA IN ch1。40 ディスクリプタ × 3840 バイト（6 ライン）をフレームバッファに直接割り当て、
+  rec_data_bytelen = 3840-1 で各ディスクリプタに EOF。LCD_CAM の CAM_VSYNC_INT_RAW をポーリングしてフレーム開始を待ち、最後のディスクリプタの EOF で完了。
+- ハマりどころ:
+  - **VSYNC フラグはカメラ部が動いている（cam_start=1）間しか立たない**。esp32-camera も ll_cam_config の最後で cam_start=1 にしている。
+  - **GDMA のリセット（SYSTEM PERIP_RST_EN1.DMA_RST）は起動直後に立っている**。I2S 側の初期化で解除していたので気付かなかった。
+    カメラ単体のプログラムでは DMA が全く動かなかった（IN_DSCR=0）。
+- 信号の実測: VSYNC 20fps、1 フレーム 240 ライン（QVGA 設定どおり）。
+- 実機（2026-10-01）: 取り込み 49〜132ms（VSYNC 待ちを含む）、LCD 表示 36ms、BMP 保存 1.3 秒（230,454 バイト）。
+  ユーザーが写真の撮影と SD への保存を確認。画素は上位バイトが先の RGB565（そのまま LCD に送って正しく表示される）。
+- プレビュー（連続表示）は、取り込み + 表示で 1 枚 90〜170ms → 6〜10fps 程度の見込み（未実装）。
