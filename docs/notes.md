@@ -12,6 +12,15 @@
 - → I2C スキャンは「レジスタポインタ 0x00 を 1 バイト書く」`Tx(addr, []byte{0}, nil)` で行う（examples/00_i2c_scan）。
 - `Tx(addr, []byte{reg}, buf)`（書いてから読む）も同じ理由で、デバイス不在を検出できない。
   ドライバの `Configure()` ではチップ ID レジスタ（AXP2101: 0x03=0x4A、AW9523B: 0x10=0x23）を読んで存在確認している。
+- **NACK を一度受けると、以降の通信がすべて NACK エラーになる**（`Configure` し直すと復帰）。
+  スキャンでは NACK のたびに再設定している。
+- **読み出しを含む `Tx` は TRANS_COMPLETE（STOP 送出完了）より前に戻る。** 直後にすき間なく次の通信をすると、
+  エラーなしで前回の値が返り、さらに次の通信が NACK になる（実機 2026-10-01 に再現: 読み→読み で 2 回目が化ける）。
+  - SR の `SCL_MAIN_STATE_LAST` / `BUS_BUSY` では完了を判定できなかった（"last" の状態で、現在の状態ではない）。
+  - 回避策 `cores3/i2c.go`: 読み出しの後に INT_RAW の TRANS_COMPLETE を最大 2ms 待つ（ドライバが戻り際に割り込みビットを
+    クリアするので、先に完了していた場合はタイムアウトで抜ける。1400 回中 1 回）。エラー時は再設定する。
+  - 1400 回の連続読み書きで値化け・エラーなし。400kHz でも動作。
+  - TODO: TinyGo 本体に報告・修正 PR を出す（`machine` には手を入れない方針なので、ここでは回避策のみ）。
 
 ## 電源投入シーケンス（M1）
 `cores3.Init()` は次の 2 つをこの順に再現している。
@@ -36,8 +45,8 @@
 - TinyGo の SPI ドライバは半二重（SIO）読み出しに対応していないため、判別時だけ 4 本のピンを GPIO にしてビットバンする
   （`ili9342.ProbeVariant`）。その後 `machine.SPI0.Configure` でピンを SPI に戻す。
 - M5GFX は読み出し値を `(v >> 1) & 0x7F` に正規化して比較している（ESP32-S3 でダミー1bitを入れる都合）。同じ手順を再現した。
-- TODO(verify): ビットバン版の判別結果が実機で正しく出るか（ログの `RDDID=0xe3` と `-> ILI9342E/C`）。
-  判別できないときは M5GFX と同じく ILI9342C とみなす。
+- 実機（2026-10-01）: `RDDID=0xe3 DDh=0x7f CBh=0x7f ID4=0x1342 -> ILI9342C`。手元の個体は C だった。
+  E での判別は未検証。判別できないときは M5GFX と同じく ILI9342C とみなす。
 
 ## GPIO35（LCD D/C と SD MISO の兼用）
 - M5GFX `Panel_M5StackCoreS3_T::cs_control()` は、LCD の CS を上げ下げするたびに GPIO35 の出力信号を切り替えている:
@@ -47,4 +56,5 @@
 
 ## SPI
 - LCD は 40MHz（M5GFX と同じ）。G36/G37 は FSPI の IOMUX ピンではないので GPIO マトリクス経由。
-  TODO(verify): 表示が乱れる場合は `cores3.LCDFrequency` を 20MHz に下げて試す。
+  表示が乱れる場合は `cores3.LCDFrequency` を 20MHz に下げて試す。
+- 01_display の描画速度: 円+正方形 500 組で約 1.32 秒（TinyGo の SPI.Tx は 64 バイトずつのポーリング転送、DMA なし）。
