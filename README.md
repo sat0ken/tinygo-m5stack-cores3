@@ -6,6 +6,11 @@ M5Stack 公式の [CoreS3 Arduino チュートリアル](https://docs.m5stack.co
 M5Unified / M5GFX は移植していません。レジスタ値や初期化の手順を参照資料として読み、CoreS3 用の薄い Go パッケージを自作しています。
 参照した箇所は、ソースコードのコメントに `ref:` として書いてあります。
 
+| ドキュメント | 内容 |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | コード解説（層の構成、起動の流れ、SPI 共有、DMA など。図付き） |
+| [docs/notes.md](docs/notes.md) | 調査メモ・ハマりどころの記録 |
+
 ## 動作状況
 
 すべて CoreS3 Lite の実機で確認済みです（2026-10-01）。
@@ -99,7 +104,7 @@ tinygo flash -target=esp32s3-generic ./tools/sdput   # カードに書き込む
 ├── internal/    ESP32-S3 のペリフェラル（I2S、カメラ）と小物（描画、PNG、WAV、BMP）
 ├── examples/    公式チュートリアルの移植（1 本 1 ディレクトリ）
 ├── tools/sdput/ microSD に素材を置くツール
-└── docs/notes.md 調査メモ・ハマりどころの記録
+└── docs/        コード解説（architecture.md）、調査メモ（notes.md）
 ```
 
 ### ドライバ

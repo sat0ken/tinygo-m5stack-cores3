@@ -3,3 +3,5 @@ build/
 *.elf
 internal/pngstream/testdata/*.png
 tools/sdput/assets/*.png
+docs/quiz.md
+docs/quiz_answers.md
