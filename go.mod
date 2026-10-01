@@ -9,5 +9,6 @@ require (
 
 require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
+	golang.org/x/image v0.46.0 // indirect
 	tinygo.org/x/tinyfs v0.5.0 // indirect
 )

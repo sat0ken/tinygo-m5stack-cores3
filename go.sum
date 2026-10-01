@@ -1,5 +1,7 @@
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 h1:El6M4kTTCOh6aBiKaUGG7oYTSPP8MxqL4YI3kZKwcP4=
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510/go.mod h1:pupxD2MaaD3pAXIBCelhxNneeOaAeabZDe5s4K6zSpQ=
+golang.org/x/image v0.46.0 h1:b1+oYj0Jbp6K5MDT4i4/eZpYlk3V8SJhhDKh6LBHAyQ=
+golang.org/x/image v0.46.0/go.mod h1:3B3W05VGVQyuXucLINLjXKrqISASfi4Xj+iCVkLMwew=
 tinygo.org/x/drivers v0.36.0 h1:F0x342A6GWqh6abtCa57uAxCyz/b9MbGzvIVvIf+gpE=
 tinygo.org/x/drivers v0.36.0/go.mod h1:DQgKyHkB4G6IEOKVTAjApbKnWGwESN91EVJO+nMOE9Y=
 tinygo.org/x/tinyfont v0.7.0 h1:Ju901eGRThlHLoti9K7myMYyv4phd3I0DrJwc14NTTU=
