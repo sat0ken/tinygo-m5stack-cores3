@@ -252,6 +252,9 @@ func (d *Device) SetRotation(r uint8) {
 	d.Command(MADCTL, m)
 }
 
+// Rotation returns the controller rotation (0..7) set by SetRotation.
+func (d *Device) Rotation() uint8 { return d.rotation }
+
 // Size returns the current size of the display.
 func (d *Device) Size() (x, y int16) { return d.width, d.height }
 

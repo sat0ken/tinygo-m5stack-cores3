@@ -58,3 +58,26 @@
 - LCD は 40MHz（M5GFX と同じ）。G36/G37 は FSPI の IOMUX ピンではないので GPIO マトリクス経由。
   表示が乱れる場合は `cores3.LCDFrequency` を 20MHz に下げて試す。
 - 01_display の描画速度: 円+正方形 500 組で約 1.32 秒（TinyGo の SPI.Tx は 64 バイトずつのポーリング転送、DMA なし）。
+
+## タッチ（M3）
+- tinygo-org/drivers の `ft6336` は使わなかった。理由:
+  - `Configure()` が INT ピンを **プルダウン** にする。CoreS3 の INT（GPIO21）は AW9523B のオープンドレイン INTN なので、プルアップが必要。
+  - `Read()` のたびに `[]byte{0x02}` をヒープに確保する（ループで呼ぶと規則6に反する）。
+  - `ReadTouchPoint()` は Core2 前提の係数（/320, /270）で 16bit にスケーリングしていて、生の座標が取れない。
+- → `cores3/touch.go` で M5GFX と同じ手順で読む:
+  - GPIO21 が Low のときだけ FT6336U を読む。0 点なら AW9523B の 0x00/0x01 を読んで INT を解除する（`Touch_M5StackCoreS3::getTouchRaw`）。
+  - 2 回連続で同じ値が読めるまで読み直す（最大5回）（`Touch_FT5x06::getTouchRaw`）。
+- 状態遷移は M5Unified `Touch_Class::update` / `update_detail` を移植（flick 閾値 8px、hold 500ms、更新間隔 4ms）。
+  drag は「hold のあとに動かした」状態（hold 0101 | flick_begin 1011 = drag_begin 1111）。
+- 座標変換: Touch_M5StackCoreS3 は x 0..319 / y 0..239、offset_rotation 0。既定の画面向きではコントローラ回転 0 なので、生座標＝画面座標。
+- 実機: `FT6336U CIPHER=0x64 FIRMID=0x10 VENDID=0x11`。
+
+## 電源ボタン（M3）
+- AXP2101 の IRQ ステータス 0x49 の bit3（短押し）/ bit2（長押し）を 4ms ごとに読み、1 を書いてクリアする（M5Unified `getPekPress`）。
+  押している最中の状態は取れない（公式でも wasClicked / wasHold 相当のみ）。
+
+## 文字表示
+- tinyfont の `WriteLine` は 1 ピクセルずつ `SetPixel` を呼ぶので、SPI LCD ではウィンドウ設定のコストが大きい。
+  `internal/gfx` でグリフのビットマップを横方向のランにまとめて `FillRectangle565` で描く。
+- `Font.GetGlyph` はインタフェース（Glypher）を返すため文字ごとにヒープ確保が起きる。`gfx` では `Font.Glyphs` を直接二分探索する。
+- 公式の `fonts::Orbitron_Light_24` は tinyfont に無いので FreeSans 12pt で代用。
