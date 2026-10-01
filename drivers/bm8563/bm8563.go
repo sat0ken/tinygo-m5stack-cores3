@@ -131,6 +131,27 @@ func (d *Device) SetTime(t time.Time) error {
 	return d.bus.Tx(d.Address, d.buf[:8], nil)
 }
 
+// DisableIRQ disables the alarm (all alarm fields) and the timer.
+// ref: M5Unified PCF8563_Class::disableIRQ (0x09..0x0C = 0x80, 0x0E = 0)
+func (d *Device) DisableIRQ() error {
+	d.buf[0] = 0x09
+	d.buf[1], d.buf[2], d.buf[3], d.buf[4] = 0x80, 0x80, 0x80, 0x80
+	if err := d.bus.Tx(d.Address, d.buf[:5], nil); err != nil {
+		return err
+	}
+	return d.WriteRegister(RegTimerCtrl, 0)
+}
+
+// ClearIRQ clears the alarm and timer flags (AF, TF).
+// ref: M5Unified PCF8563_Class::clearIRQ (bitOff(0x01, 0x0C))
+func (d *Device) ClearIRQ() error {
+	v, err := d.ReadRegister(RegControl2)
+	if err != nil {
+		return err
+	}
+	return d.WriteRegister(RegControl2, v&^(Ctrl2TF|Ctrl2AF))
+}
+
 // SetTimer starts the countdown timer with interrupt output (INT low when it
 // expires) and returns the programmed duration. 0 disables the timer.
 // Up to 255 s it counts seconds, above that minutes (max 255 min).

@@ -10,10 +10,15 @@ import (
 // RTC is the BM8563, ready after InitRTC.
 var RTC bm8563.Device
 
-// InitRTC prepares the RTC.
+// InitRTC prepares the RTC and disables its interrupts, as M5.begin() does
+// with the default cfg.disable_rtc_irq = true.
+// ref: M5Unified src/M5Unified.inl (if (cfg.disable_rtc_irq) { M5.Rtc.disableIRQ(); })
 func InitRTC() error {
 	RTC = bm8563.New(I2C)
-	return RTC.Configure()
+	if err := RTC.Configure(); err != nil {
+		return err
+	}
+	return RTC.DisableIRQ()
 }
 
 // SyncSystemTime sets the ESP32 clock (time.Now) from the RTC (UTC).
