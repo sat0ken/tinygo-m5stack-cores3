@@ -185,3 +185,14 @@
   I2S のクロックを出してからアンプを有効にしている。
 - 実機確認（2026-10-01）: 10kHz / 4kHz のトーンが鳴ることをユーザーが確認。レジスタの読み戻しも一致。
   TODO(verify): 音量は M5Unified と合わせていない（ToneAmplitude で近似）。
+
+## マイク（M7-2）
+- `internal/i2s` に RX（GDMA IN ch0）を追加。RX は rx_eof_num = バッファのバイト数（ESP-IDF i2s_common.c と同じ）にして、
+  IN_SUC_EOF_DES_ADDR をポーリングして受信済みのディスクリプタを数える。読むのが遅れて上書きされた分は Overruns に数える。
+- クロック: M5Unified の mic_task と同じく PLL_240M（rx_clk_sel=1）、MCLK = 256fs（G0 に出力、mclk_sel=1 で RX にバインド）、
+  BCK = MCLK/8（"CoreS3 のマイクは div_m >= 8"）。M5Unified の PLL_D2 = 120MHz と bits=16 の計算は、240MHz と 32bit/フレームの計算と同じ。
+- ES7210: M5Unified `_microphone_enabled_cb_cores3` の初期化列（RESET_CTL=0xFF のあと 29 レジスタ）。MCLK を出してから設定する。
+- 受信データ処理は M5Unified mic_task と同じ（ステレオ入力、自動ゼロレベル、noise_filter_level、ゲイン = magnification/(os<<1) = 1、L/R 平均）。
+- 再生は TX を 17kHz で直接設定して鳴らす（M5 は 48kHz にリサンプリング）。AW88298 の 0x06 はレートから再計算（17kHz → 0x14C3）。
+- 実機確認（2026-10-01）: 録音中の波形表示、タッチで直前 4.8 秒の再生、電源ボタンでノイズフィルタ切り替えをユーザーが確認。
+  320 サンプル（18.8ms）ごとの描画で録音に追従できている（100 フレーム ≒ 1.9 秒）。
