@@ -23,7 +23,12 @@ func InitSpeaker() error { return StartSpeaker(SpeakerSampleRate) }
 // StartSpeaker starts I2S1 TX (BCK=G34, WS=G33, DOUT=G13, no MCLK, mono) at
 // rate and enables the AW88298. The microphone must be stopped (shared I2S1).
 // ref: M5Unified src/M5Unified.inl (CoreS3 spk_cfg: pin_bck 34, pin_ws 33, pin_data_out 13, i2s_port I2S_NUM_1)
-func StartSpeaker(rate uint32) error {
+func StartSpeaker(rate uint32) error { return StartSpeakerStereo(rate, false) }
+
+// StartSpeakerStereo is StartSpeaker with interleaved L, R samples when
+// stereo is true. (The CoreS3 has one speaker; the AW88298 mixes the slots
+// according to its default channel setting.)
+func StartSpeakerStereo(rate uint32, stereo bool) error {
 	speakerRate = rate
 	i2s.I2S1TX.Configure(i2s.Config{
 		SampleRate: rate,
@@ -31,7 +36,7 @@ func StartSpeaker(rate uint32) error {
 		WS:         I2S_WS,
 		DataOut:    I2S_DATA_OUT,
 		MCLK:       machine.NoPin,
-		Mono:       true,
+		Mono:       !stereo,
 	})
 	i2s.I2S1TX.Start() // clocks running (silence) before the amp is enabled
 
@@ -51,11 +56,17 @@ func StopSpeaker() {
 	i2s.I2S1TX.Stop()
 }
 
-// PlayPCM plays mono 16 bit samples at the speaker rate and returns when
-// they have been played.
+// PlayPCM plays 16 bit samples (mono, or L/R interleaved after
+// StartSpeakerStereo) and returns when they have been played.
 func PlayPCM(samples []int16) {
 	i2s.I2S1TX.Write(samples)
 	i2s.I2S1TX.Flush()
+}
+
+// QueuePCM queues samples without waiting for the end of playback (blocks
+// only while the DMA ring is full). Call PlayPCM(nil) to wait for the end.
+func QueuePCM(samples []int16) {
+	i2s.I2S1TX.Write(samples)
 }
 
 // toneWave is M5Unified's default tone wave (one sine period, unsigned 8 bit).
