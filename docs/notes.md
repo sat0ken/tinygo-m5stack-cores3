@@ -236,3 +236,15 @@
 - 12_mic の再生（リサンプリング版）の実機確認（M7）
 - TinyGo 本体への報告候補: ESP32-S3 I2C の読み出し完了前 return / NACK 後に復帰しない、[N]string 添字アクセスでの OOM、
   大きな go:embed で起動不能。drivers への報告候補: pcf8563 の月マスク
+
+## カメラ（M8）の事前調査（2026-10-01、未着手）
+- 公式: esp32-camera、RGB565 / QVGA、fb_count=2 を PSRAM に置く、pin_xclk=-1（GC0308 側に発振器）、SCCB は内部 I2C（G12/G11）。
+- TinyGo: **PSRAM 未対応**（runtime / machine / targets に実装なし。リンカの DRAM は 416KB）。LCD_CAM のレジスタ定義は device/esp にある。
+- QVGA RGB565 は 1 枚 153.6KB。PSRAM なしでも内部 RAM に 1 枚なら置ける（ヒープ約 389KB）。2 枚は厳しい。VGA は不可。
+- 取り込み（参照: esp32-camera target/esp32s3/ll_cam.c、ESP-IDF gdma_channel.h / gpio_sig_map.h）:
+  - LCD_CAM の cam 部 + GDMA IN（周辺番号 5 = SOC_GDMA_TRIG_PERIPH_CAM0）。I2S RX と同じ作り（ディスクリプタ輪 + EOF ポーリング）で書ける。
+  - cam_clk_sel=3（クロック出力なし、PCLK で取り込む）、cam_vsync_filter_en=1、rec_data_bytelen でディスクリプタ単位の EOF。
+  - 入力信号: CAM_DATA_IN0..7 = 133..140、CAM_PCLK = 149、CAM_H_ENABLE = 150、CAM_V_SYNC = 152。
+  - esp32-camera は VSYNC 割り込みでフレームの区切りを取る。割り込みなしでは VSYNC（G46）のポーリングで代用する。
+- GC0308 の初期化: esp32-camera sensors/private_include/gc0308_settings.h の 247 レジスタ + set_pixformat(RGB565) + set_framesize（QVGA はサブサンプル設定）。
+- 表示: 153.6KB を SPI 40MHz で送ると理論値 31ms。TinyGo の SPI は 64 バイトずつのポーリングなので実測は 40〜100ms 程度の見込み → 5〜10fps。
