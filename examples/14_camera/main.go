@@ -1,12 +1,11 @@
-// 14_camera takes a photo with the GC0308 camera when the screen is touched,
-// shows it and saves it on the microSD card as /CAM_nnnn.BMP (24 bit BMP,
-// the first unused number; existing files are never overwritten).
+// 14_camera shows a live preview from the GC0308 camera; touching the screen
+// freezes the latest frame and saves it on the microSD card as /CAM_nnnn.BMP
+// (24 bit BMP, the first unused number; existing files are never
+// overwritten).
 //
-// After start-up one photo is taken automatically and only shown (to check
-// the camera without touching).
-//
-// The M5Stack tutorial streams video with frame buffers in PSRAM, which
-// TinyGo does not support; see docs/notes.md.
+// The M5Stack tutorial streams video with two frame buffers in PSRAM, which
+// TinyGo does not support; here one frame buffer in internal RAM is captured
+// and drawn in turn (about 6-10 fps). See docs/notes.md.
 //
 // ref: https://docs.m5stack.com/ja/arduino/m5cores3/camera
 package main
@@ -61,47 +60,53 @@ func main() {
 		}
 	}
 	println("Camera Init Success")
-	gfx.DrawTextCentered(d, font, w/2, h/2, "Touch to take a photo", gfx.White)
+	gfx.DrawTextCentered(d, font, w/2, h/2, "Touch to save a photo", gfx.White)
 
 	time.Sleep(time.Second)
 	start := time.Now()
-	count := 0
-	first := true // the first photo is taken without a touch and not saved
-	for {
+	touched := func() bool {
 		cores3.Touch.Update(uint32(time.Since(start).Milliseconds()))
-		touched := cores3.Touch.Count() > 0 && cores3.Touch.Detail().WasClicked()
-		if !first && !touched {
-			time.Sleep(time.Millisecond)
-			continue
-		}
-		save := !first
-		first = false
-
-		t0 := time.Now()
+		return cores3.Touch.Detail().WasPressed() // touch_begin: react to the start of a touch
+	}
+	frames := 0
+	fpsStart := time.Now()
+	for {
+		save := touched()
 		if err := cores3.CapturePhoto(photo[:]); err != nil {
 			println("capture failed:", err.Error())
-			gfx.DrawTextCentered(d, font, w/2, 20, "Capture failed", gfx.Red)
 			continue
 		}
-		t1 := time.Now()
 		d.DrawRGBBitmap8(0, 0, photo[:], cores3.PhotoWidth, cores3.PhotoHeight)
-		count++
-		println("photo", count, "captured in", t1.Sub(t0).Milliseconds(), "ms, drawn in", time.Since(t1).Milliseconds(), "ms")
-
-		if save && sdOK {
-			gfx.DrawTextCentered(d, font, w/2, h-16, "Saving...", gfx.Yellow)
-			t2 := time.Now()
-			path, err := savePhoto()
-			// redraw the bottom lines that the message covered
-			d.DrawRGBBitmap8(0, h-32, photo[(int(h)-32)*int(w)*2:], w, 32)
-			if err != nil {
-				println("save failed:", err.Error())
-				gfx.DrawTextCentered(d, font, w/2, h-16, "Save failed", gfx.Red)
-			} else {
-				println("saved", path, "in", time.Since(t2).Milliseconds(), "ms")
-				gfx.DrawTextCentered(d, font, w/2, h-16, path[1:], gfx.Green)
-			}
+		frames++
+		if frames%50 == 0 {
+			ms := time.Since(fpsStart).Milliseconds()
+			println("preview:", 50*1000/ms, "fps")
+			fpsStart = time.Now()
 		}
+		save = touched() || save
+		if !save {
+			continue
+		}
+		if !sdOK {
+			gfx.DrawTextCentered(d, font, w/2, h-16, "No SD card", gfx.Red)
+			time.Sleep(1500 * time.Millisecond)
+			continue
+		}
+		gfx.DrawTextCentered(d, font, w/2, h-16, "Saving...", gfx.Yellow)
+		t2 := time.Now()
+		path, err := savePhoto()
+		// redraw the bottom lines that the message covered
+		d.DrawRGBBitmap8(0, h-32, photo[(int(h)-32)*int(w)*2:], w, 32)
+		if err != nil {
+			println("save failed:", err.Error())
+			gfx.DrawTextCentered(d, font, w/2, h-16, "Save failed", gfx.Red)
+		} else {
+			println("saved", path, "in", time.Since(t2).Milliseconds(), "ms")
+			gfx.DrawTextCentered(d, font, w/2, h-16, path[1:], gfx.Green)
+		}
+		time.Sleep(1500 * time.Millisecond)
+		fpsStart = time.Now()
+		frames = 0
 	}
 }
 
