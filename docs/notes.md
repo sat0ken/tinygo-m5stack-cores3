@@ -172,3 +172,16 @@
   `tools/sdput` で端末から SD に書き込む（既存ファイルは上書きしない）。画像は git に入れず `tools/sdput/fetch.sh` で取得。
 - 実機（2026-10-01）: 4GB SDHC（FAT）。25MHz で読み書きでき、PNG 1 枚の表示に約 0.5 秒。既存ファイル（JPEG 13 個）が残っていることも確認。
 - 実機確認（2026-10-01）: 10_pic の文字表示と、2 枚の画像（電車・雪山）の交互表示をユーザーが目視で確認。M6 完了。
+
+## スピーカー（M7-1）
+- TinyGo に ESP32 系の I2S は無い（machine/i2s.go は SAMD21 用）。さらに **ESP32-S3 の I2S には CPU からデータを書く FIFO レジスタが無く**、
+  GDMA 経由でしか送受信できない（ESP-IDF i2s_ll.h に FIFO 書き込み関数が無く、FIFO はリセットのみ）。
+- `internal/i2s`: I2S1 + GDMA OUT ch0 をレジスタ直叩きで実装。参照は ESP-IDF の i2s_ll.h / i2s_hal.c / gdma_ll.h / dma_types.h / gpio_sig_map.h。
+  - クロック: PLL_F160M（S3 の既定）、MCLK = 256fs、BCK = fs×32。48kHz では 160MHz / 12.288MHz = 13 + 1/48。
+  - スロット: Philips（msb_shift=1, ws_width=16）、16bit×2、モノラルは tx_mono + tx_chan_equal で左スロットを複製（ESP-IDF の is_copy_mono）。
+  - DMA: 1KB のバッファ × 8 をディスクリプタで輪にし、各ディスクリプタに suc_eof。OUT_EOF_DES_ADDR をポーリングして再生済みスロットを数え、
+    再生済みのバッファはゼロで埋める（アンダーラン時に古い音を繰り返さない）。
+- AW88298: M5Unified `_speaker_enabled_cb_cores3` と同じ値（0x61=0x0673, 0x04=0x4040, 0x05=0x0008, 0x06=0x14C8@48kHz, 0x0C=0x0064）。
+  I2S のクロックを出してからアンプを有効にしている。
+- 実機確認（2026-10-01）: 10kHz / 4kHz のトーンが鳴ることをユーザーが確認。レジスタの読み戻しも一致。
+  TODO(verify): 音量は M5Unified と合わせていない（ToneAmplitude で近似）。
