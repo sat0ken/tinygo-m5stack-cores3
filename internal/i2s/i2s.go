@@ -35,9 +35,22 @@ const (
 	gdmaPeriphI2S1 = 4  // SOC_GDMA_TRIG_PERIPH_I2S1
 )
 
-// srcClock is PLL_F160M, the ESP-IDF default I2S clock source on the S3
-// (clk_tree_defs.h: I2S_CLK_SRC_DEFAULT = SOC_MOD_CLK_PLL_F160M, tx_clk_sel = 2).
-const srcClock = 160_000_000
+// Clock sources (tx_clk_sel / rx_clk_sel). ref: i2s_ll_tx_clk_set_src
+const (
+	// SrcPLL160M is the ESP-IDF default on the S3
+	// (clk_tree_defs.h: I2S_CLK_SRC_DEFAULT = SOC_MOD_CLK_PLL_F160M).
+	SrcPLL160M = 2
+	// SrcPLL240M is what M5Unified selects for the microphone
+	// (Mic_Class.inl: rx_clk_sel = 1 "PLL_240M_CLK").
+	SrcPLL240M = 1
+)
+
+func srcFreq(src uint8) uint32 {
+	if src == SrcPLL240M {
+		return 240_000_000
+	}
+	return 160_000_000
+}
 
 // Config is the TX configuration.
 type Config struct {
@@ -47,7 +60,24 @@ type Config struct {
 	MCLK       machine.Pin // machine.NoPin when not used
 	// Mono sends each 16 bit sample to both slots (ESP-IDF I2S_SLOT_MODE_MONO
 	// with I2S_STD_SLOT_BOTH). Otherwise samples are interleaved L, R.
+	// (TX only; RX always delivers L, R pairs.)
 	Mono bool
+	// Source is SrcPLL160M (default when 0) or SrcPLL240M.
+	Source uint8
+	// DataIn is the RX data pin.
+	DataIn machine.Pin
+}
+
+// enableBus turns on and resets I2S1 and GDMA.
+// ref: i2s_ll_enable_bus_clock / i2s_ll_reset_register, _gdma_ll_enable_bus_clock / _gdma_ll_reset_register
+func enableBus() {
+	esp.SYSTEM.SetPERIP_CLK_EN0_I2S1_CLK_EN(1)
+	esp.SYSTEM.SetPERIP_RST_EN0_I2S1_RST(1)
+	esp.SYSTEM.SetPERIP_RST_EN0_I2S1_RST(0)
+	esp.SYSTEM.SetPERIP_CLK_EN1_DMA_CLK_EN(1)
+	esp.SYSTEM.SetPERIP_RST_EN1_DMA_RST(1)
+	esp.SYSTEM.SetPERIP_RST_EN1_DMA_RST(0)
+	esp.DMA.SetMISC_CONF_CLK_EN(1) // gdma_ll_force_enable_reg_clock
 }
 
 const (
@@ -80,6 +110,10 @@ func outFunc(p machine.Pin) *volatile.Register32 {
 	return (*volatile.Register32)(unsafe.Add(unsafe.Pointer(&esp.GPIO.FUNC0_OUT_SEL_CFG), uintptr(p)*4))
 }
 
+func inFunc(signal uint32) *volatile.Register32 {
+	return (*volatile.Register32)(unsafe.Add(unsafe.Pointer(&esp.GPIO.FUNC0_IN_SEL_CFG), uintptr(signal)*4))
+}
+
 func routeOut(p machine.Pin, signal uint32) {
 	if p == machine.NoPin {
 		return
@@ -91,14 +125,7 @@ func routeOut(p machine.Pin, signal uint32) {
 // Configure sets up I2S1 TX and GDMA OUT channel 0. Call Start to begin
 // clocking out (silence).
 func (t *TX) Configure(cfg Config) {
-	// Bus clocks and resets. ref: i2s_ll_enable_bus_clock / i2s_ll_reset_register, _gdma_ll_enable_bus_clock / _gdma_ll_reset_register
-	esp.SYSTEM.SetPERIP_CLK_EN0_I2S1_CLK_EN(1)
-	esp.SYSTEM.SetPERIP_RST_EN0_I2S1_RST(1)
-	esp.SYSTEM.SetPERIP_RST_EN0_I2S1_RST(0)
-	esp.SYSTEM.SetPERIP_CLK_EN1_DMA_CLK_EN(1)
-	esp.SYSTEM.SetPERIP_RST_EN1_DMA_RST(1)
-	esp.SYSTEM.SetPERIP_RST_EN1_DMA_RST(0)
-	esp.DMA.SetMISC_CONF_CLK_EN(1) // gdma_ll_force_enable_reg_clock
+	enableBus()
 
 	routeOut(cfg.BCK, sigI2S1OBCK)
 	routeOut(cfg.WS, sigI2S1OWS)
@@ -115,8 +142,23 @@ func (t *TX) Configure(cfg Config) {
 	bckDiv := uint32(256 / 32)
 	r.SetTX_CLKM_CONF_TX_CLK_ACTIVE(1)
 	r.SetRX_CLKM_CONF_MCLK_SEL(0)
-	r.SetTX_CLKM_CONF_TX_CLK_SEL(2) // PLL_F160M
-	setMclkDiv(srcClock, mclk)
+	src := cfg.Source
+	if src == 0 {
+		src = SrcPLL160M
+	}
+	r.SetTX_CLKM_CONF_TX_CLK_SEL(uint32(src))
+	n, x, y, z, yn1 := mclkDiv(srcFreq(src), mclk)
+	// ref: i2s_ll_tx_set_raw_clk_div ("set a small division first" workaround)
+	r.SetTX_CLKM_CONF_TX_CLKM_DIV_NUM(2)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_YN1(0)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Y(1)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Z(0)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_X(0)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_YN1(yn1)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Z(z)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Y(y)
+	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_X(x)
+	r.SetTX_CLKM_CONF_TX_CLKM_DIV_NUM(n)
 	r.SetTX_CONF1_TX_BCK_DIV_NUM(bckDiv - 1)
 
 	// Slot (standard / Philips, 16 bit). ref: i2s_hal_std_set_tx_slot (SOC_I2S_HW_VERSION_2)
@@ -160,36 +202,35 @@ func (t *TX) Configure(cfg Config) {
 	t.lastEOF = numDesc - 1
 }
 
-// setMclkDiv sets MCLK = src / (N + b/a).
-// ref: i2s_ll_tx_set_mclk / i2s_ll_tx_set_raw_clk_div (yn1/x/y/z encoding,
-// "set a small division first" workaround), hal_utils_calc_clk_div_frac_accurate
-func setMclkDiv(src, mclk uint32) {
-	integ := src / mclk
+// mclkDiv returns the MCLK divider src / (N + b/a) in the register encoding
+// (div_num, x, y, z, yn1).
+// ref: i2s_ll_tx_set_mclk (yn1/x/y/z from numerator/denominator),
+// hal_utils_calc_clk_div_frac_accurate (best fraction, denominator < 512)
+func mclkDiv(src, mclk uint32) (n, x, y, z, yn1 uint32) {
+	n = src / mclk
 	rem := src % mclk
 	num, den := uint32(0), uint32(1)
 	if rem != 0 {
-		// best fraction num/den with den <= 511 (I2S_LL_CLK_FRAC_DIV_AB_MAX - 1)
 		bestErr := uint64(1 << 63)
 		for d := uint32(2); d < 512; d++ {
-			n := (uint64(rem)*uint64(d) + uint64(mclk)/2) / uint64(mclk)
-			if n == 0 || n >= uint64(d) {
+			nn := (uint64(rem)*uint64(d) + uint64(mclk)/2) / uint64(mclk)
+			if nn == 0 || nn >= uint64(d) {
 				continue
 			}
-			// error = |rem/mclk - n/d| scaled by mclk*d
-			e := uint64(rem)*uint64(d) - n*uint64(mclk)
-			if int64(e) < 0 {
-				e = -e
+			a, b := uint64(rem)*uint64(d), nn*uint64(mclk)
+			e := a - b
+			if b > a {
+				e = b - a
 			}
 			e = e * 1024 / uint64(d)
 			if e < bestErr {
-				bestErr, num, den = e, uint32(n), d
+				bestErr, num, den = e, uint32(nn), d
 				if e == 0 {
 					break
 				}
 			}
 		}
 	}
-	var x, y, z, yn1 uint32
 	if num != 0 && den != 0 {
 		if num*2 > den {
 			yn1 = 1
@@ -200,17 +241,7 @@ func setMclkDiv(src, mclk uint32) {
 		x = den/z - 1
 		y = den % z
 	}
-	r := esp.I2S1
-	r.SetTX_CLKM_CONF_TX_CLKM_DIV_NUM(2)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_YN1(0)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Y(1)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Z(0)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_X(0)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_YN1(yn1)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Z(z)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_Y(y)
-	r.SetTX_CLKM_DIV_CONF_TX_CLKM_DIV_X(x)
-	r.SetTX_CLKM_CONF_TX_CLKM_DIV_NUM(integ)
+	return
 }
 
 // Start resets the FIFO and DMA and starts clocking out the ring.

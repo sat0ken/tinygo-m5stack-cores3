@@ -8,19 +8,25 @@ import (
 	"esp32-s3-lite/internal/i2s"
 )
 
-// SpeakerSampleRate is the I2S rate used for the speaker.
+// SpeakerSampleRate is the default I2S rate for the speaker.
 // ref: M5Unified src/utility/Speaker_Class.hpp (sample_rate = 48000)
 const SpeakerSampleRate = 48000
 
-// Amp is the speaker amplifier, ready after InitSpeaker.
+// Amp is the speaker amplifier, ready after StartSpeaker.
 var Amp aw88298.Device
 
-// InitSpeaker starts I2S1 TX (BCK=G34, WS=G33, DOUT=G13, no MCLK, mono)
-// and enables the AW88298.
+var speakerRate uint32
+
+// InitSpeaker starts the speaker at SpeakerSampleRate.
+func InitSpeaker() error { return StartSpeaker(SpeakerSampleRate) }
+
+// StartSpeaker starts I2S1 TX (BCK=G34, WS=G33, DOUT=G13, no MCLK, mono) at
+// rate and enables the AW88298. The microphone must be stopped (shared I2S1).
 // ref: M5Unified src/M5Unified.inl (CoreS3 spk_cfg: pin_bck 34, pin_ws 33, pin_data_out 13, i2s_port I2S_NUM_1)
-func InitSpeaker() error {
+func StartSpeaker(rate uint32) error {
+	speakerRate = rate
 	i2s.I2S1TX.Configure(i2s.Config{
-		SampleRate: SpeakerSampleRate,
+		SampleRate: rate,
 		BCK:        I2S_BCK,
 		WS:         I2S_WS,
 		DataOut:    I2S_DATA_OUT,
@@ -34,7 +40,22 @@ func InitSpeaker() error {
 		return err
 	}
 	Amp = aw88298.New(I2C)
-	return Amp.Enable(SpeakerSampleRate)
+	return Amp.Enable(rate)
+}
+
+// StopSpeaker disables the amplifier and stops I2S TX.
+// ref: M5Unified _speaker_enabled_cb_cores3 (disabled: 0x04 = 0x4000, AW9523B P0_2 low)
+func StopSpeaker() {
+	Amp.Disable()
+	IOExp.SetPins(aw9523b.Port0, P0_AW88298_RST, false)
+	i2s.I2S1TX.Stop()
+}
+
+// PlayPCM plays mono 16 bit samples at the speaker rate and returns when
+// they have been played.
+func PlayPCM(samples []int16) {
+	i2s.I2S1TX.Write(samples)
+	i2s.I2S1TX.Flush()
 }
 
 // toneWave is M5Unified's default tone wave (one sine period, unsigned 8 bit).
@@ -51,8 +72,8 @@ var toneBuf [256]int16
 // Tone plays a tone of freq Hz for ms milliseconds and returns when it has
 // been played (M5.Speaker.tone(freq, ms) followed by the playback time).
 func Tone(freq float32, ms uint32) {
-	total := int(SpeakerSampleRate * ms / 1000)
-	step := freq * 16 / SpeakerSampleRate // table entries per output sample
+	total := int(speakerRate * ms / 1000)
+	step := freq * 16 / float32(speakerRate) // table entries per output sample
 	phase := float32(0)
 	for total > 0 {
 		n := len(toneBuf)

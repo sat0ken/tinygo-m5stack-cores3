@@ -208,3 +208,43 @@ func AppendFloat(buf []byte, v float32) []byte {
 	}
 	return buf
 }
+
+// DrawTextTopCenter draws str horizontally centered on x with the top of the
+// font bounding box at y (M5GFX setTextDatum(top_center)).
+func DrawTextTopCenter(d Filler, font *tinyfont.Font, x, y int16, str string, c uint16) {
+	w := TextWidth(font, str)
+	DrawText(d, font, x-w/2, y-int16(font.BBox[3]), str, c)
+}
+
+// FillTriangle fills a triangle with horizontal spans.
+func FillTriangle(d Filler, x0, y0, x1, y1, x2, y2 int16, c uint16) {
+	// sort by y
+	if y0 > y1 {
+		x0, y0, x1, y1 = x1, y1, x0, y0
+	}
+	if y1 > y2 {
+		x1, y1, x2, y2 = x2, y2, x1, y1
+	}
+	if y0 > y1 {
+		x0, y0, x1, y1 = x1, y1, x0, y0
+	}
+	edge := func(xa, ya, xb, yb, y int16) int16 {
+		if yb == ya {
+			return xa
+		}
+		return xa + int16(int32(xb-xa)*int32(y-ya)/int32(yb-ya))
+	}
+	for y := y0; y <= y2; y++ {
+		a := edge(x0, y0, x2, y2, y)
+		var b int16
+		if y < y1 {
+			b = edge(x0, y0, x1, y1, y)
+		} else {
+			b = edge(x1, y1, x2, y2, y)
+		}
+		if a > b {
+			a, b = b, a
+		}
+		d.FillRectangle565(a, y, b-a+1, 1, c)
+	}
+}
