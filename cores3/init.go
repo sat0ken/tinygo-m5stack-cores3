@@ -34,6 +34,13 @@ var Verbose = true
 // After Init the LCD backlight is on (DLDO1), and all peripheral rails
 // (ALDO1..4) are enabled. The LCD itself is not initialized: see InitDisplay.
 func Init() error {
+	// Deselect the SPI devices first: a floating SD CS lets the microSD card
+	// take bus traffic for commands (see docs/notes.md).
+	for _, cs := range [...]machine.Pin{SD_CS, LCD_CS} {
+		cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
+		cs.High()
+	}
+
 	I2C.cfg = machine.I2CConfig{
 		Frequency: I2CFrequency,
 		SDA:       I2C_SDA,

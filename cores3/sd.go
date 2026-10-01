@@ -2,6 +2,9 @@ package cores3
 
 import (
 	"machine"
+	"time"
+
+	"esp32-s3-lite/drivers/bm8563"
 
 	_ "esp32-s3-lite/internal/libcwrap" // malloc for fatfs (C)
 
@@ -62,6 +65,9 @@ func sdEnd() {
 	LCD_DC.High()
 }
 
+// SDPowerCycle enables the power-cycle recovery of InitSD.
+var SDPowerCycle = true
+
 // sdBlockDevice wraps the card so that every access switches the bus.
 type sdBlockDevice struct{ dev *sdcard.Device }
 
@@ -90,12 +96,26 @@ func (b *sdBlockDevice) EraseBlocks(start, n int64) error {
 // be FAT12/16/32 (tinyfs fatfs is built without exFAT). The file system is
 // never formatted.
 // Init and InitDisplay must have been called before.
+//
+// A card that does not answer at all usually only recovers from a power
+// cycle (ESP32 resets and cutting ALDO4 alone did not help on a CoreS3). When
+// SDPowerCycle is true, InitSD then switches the board off with an RTC
+// wake-up in 2 s, once: after that wake-up a second failure is returned.
 func InitSD() error {
 	sdBegin(SDFrequency)
 	SD = sdcard.New(SPI, SD_SCK, SD_MOSI, SD_MISO, SD_CS)
 	err := SD.Configure() // reconfigures the bus itself (250 kHz, then 4 MHz)
 	sdEnd()
 	if err != nil {
+		if SDPowerCycle && InitRTC() == nil {
+			ctrl2, _ := RTC.ReadRegister(bm8563.RegControl2)
+			RTC.ClearIRQ()
+			if ctrl2&bm8563.Ctrl2TF == 0 { // not woken by our own RTC timer
+				println("cores3: SD card not responding (", err.Error(), "), power-cycling the board, back in 2 s")
+				time.Sleep(50 * time.Millisecond)
+				TimerSleep(2 * time.Second)
+			}
+		}
 		return err
 	}
 	sdBlock.dev = &SD
