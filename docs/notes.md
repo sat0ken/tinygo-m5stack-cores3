@@ -140,3 +140,15 @@
 ## M4 完了（2026-10-01）
 - 04_rtc / 05_ltr553 / 06_power / 07_imu の画面表示をユーザーが目視で確認済み（時刻・センサー値の変化・電源情報・IMU 9 値）。
 - 未解決: 地磁気 Y 軸の飽和（上記 IMU の TODO）、タッチ上端で Y が 17 未満にならない件（M3 の TODO）。
+
+## Wakeup（M5）
+- CoreS3 では RTC の INT が ESP32 に直結されていない（AXP2101 の IRQ 線と共有）ため、M5Unified の `timerSleep(5)` は
+  ディープスリープではなく「RTC タイマー割り込みをセット → `Axp2101.powerOff()`（reg 0x10 bit0）」になる。
+  RTC の INT で電源が入り直す。手順: LCD sleep（輝度 0 → SLPIN）→ RTC disableIRQ / clearIRQ → setTimerIRQ(5000) → powerOff。
+- M5.begin は既定（cfg.disable_rtc_irq = true）で起動時に RTC の割り込みを無効化する。`cores3.InitRTC` も同じにした。
+- 実機確認（2026-10-01, USB 接続のまま）: タッチ → USB ポート消失 → 4.5〜4.7 秒後に再列挙 → 起動。
+  起動時の RTC CTRL2 = 0x05（TF=1, TIE=1）で、RTC タイマーによる起動と確認。2 回連続で成功。
+  RTC のタイマーは 1Hz クロックで数えるため、最初の 1 カウントは 1 秒未満になり、5 秒より少し短くなる。
+- 電源断から復帰した直後は、LCD 判別の E 用キーの読み戻しが 0x7f になる（ソフトリセットだけのときは 0x00 / 0x14）。
+  どちらも ID4 で ILI9342C と判別できている。
+- Claude Code からプロセスを止めるとき `pkill -f <パターン>` を使うと、そのパターンを含む自分のシェルまで終了する。PID を指定して止める。
