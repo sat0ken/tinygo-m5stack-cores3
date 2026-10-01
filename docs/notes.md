@@ -89,3 +89,16 @@
   `internal/gfx` でグリフのビットマップを横方向のランにまとめて `FillRectangle565` で描く。
 - `Font.GetGlyph` はインタフェース（Glypher）を返すため文字ごとにヒープ確保が起きる。`gfx` では `Font.Glyphs` を直接二分探索する。
 - 公式の `fonts::Orbitron_Light_24` は tinyfont に無いので FreeSans 12pt で代用。
+
+## RTC（M4）
+- tinygo-org/drivers の `pcf8563`（v0.36.0）は使わず、`drivers/bm8563` を自作した。理由:
+  - **`ReadTime` が月を `& 0x0F` で取り出す**ため、10〜12 月（BCD 0x10〜0x12）を読み間違える。
+    実機で 2021-12-31 をセットすると 2021-03-03（2/31 が正規化）と読めた。正しくは `& 0x1F`（M5Unified も 0x1f）。
+  - 分を `% 0x7F` で取り出している（`& 0x7F` の誤り）。
+  - 曜日を 1〜7 で書く（M5Unified / データシートは 0〜6）。
+  - TODO: 上流に修正 PR を出す。
+- RTC は UTC で持つ。04_rtc は `-ldflags "-X main.setTime=..."` で日時を渡したとき、または VL フラグが立っているとき
+  （公式コメントの 2021-12-31 12:34:56）だけセットする。
+- ビルド開始から実際にセットされるまで約 8.5 秒（書き込み約 6 秒 + 起動待ち 2 秒 + 初期化）。現在時刻に +9 秒して渡すとホストと 1 秒未満で一致した:
+  `tinygo flash -target=esp32s3-generic -ldflags="-X main.setTime=$(date -u -d '+9 sec' +%Y-%m-%dT%H:%M:%SZ)" ./examples/04_rtc`
+- ESP32 の時計は `runtime.AdjustTimeOffset` で RTC に合わせる（`cores3.SyncSystemTime`）。

@@ -142,3 +142,49 @@ func String(buf []byte) string {
 	}
 	return unsafe.String(&buf[0], len(buf))
 }
+
+// Console prints text like M5GFX print/printf with a GFX font: the cursor is
+// the top-left of the line, text wraps at the right edge, and each character
+// cell is filled with Back before the glyph is drawn (M5GFX default text style:
+// white on black, setTextWrap(true)).
+type Console struct {
+	D          Filler
+	Font       *tinyfont.Font
+	Fore, Back uint16
+	X, Y       int16 // cursor (top-left of the current line)
+}
+
+// SetCursor moves the cursor.
+func (c *Console) SetCursor(x, y int16) { c.X, c.Y = x, y }
+
+// Print draws str at the cursor and advances it. '\n' starts a new line.
+func (c *Console) Print(str string) {
+	w, _ := c.D.Size()
+	lineH := int16(c.Font.YAdvance)
+	for _, r := range str {
+		if r == '\n' {
+			c.X = 0
+			c.Y += lineH
+			continue
+		}
+		g := glyph(c.Font, r)
+		adv := int16(g.XAdvance)
+		if c.X+adv > w {
+			c.X = 0
+			c.Y += lineH
+		}
+		c.D.FillRectangle565(c.X, c.Y, adv, lineH, c.Back)
+		drawGlyph(c.D, g, c.X, c.Y-int16(c.Font.BBox[3]), c.Fore)
+		c.X += adv
+	}
+}
+
+// Append2 appends v as two decimal digits (zero padded).
+func Append2(buf []byte, v int) []byte {
+	return append(buf, byte('0'+v/10%10), byte('0'+v%10))
+}
+
+// Append4 appends v as four decimal digits (zero padded).
+func Append4(buf []byte, v int) []byte {
+	return append(buf, byte('0'+v/1000%10), byte('0'+v/100%10), byte('0'+v/10%10), byte('0'+v%10))
+}
